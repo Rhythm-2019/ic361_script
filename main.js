@@ -21,30 +21,7 @@
 
     // ---------------------------- 公共函数 --------------------------
 
-    /**
-     * 
-     * @param {string} path 
-     * @returns element
-     */
-    function getElementByXpath(path) {
-        return document.evaluate(path, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
-    }
-    /**
-     * 
-     * @param {Element} element 
-     * @param {string} type 
-     * @param {function} fn 
-     */
-    function addEventListener(element, type, fn) {
-        //判断浏览器是否支持这个方法
-        if (element.addEventListener) {
-            element.addEventListener(type, fn, false);
-        } else if (element.attachEvent) {
-            element.attachEvent("on" + type, fn);
-        } else {
-            element["on" + type] = fn;
-        }
-    }
+
 
     function insertFloatWindow() {
         var idElements = getElementByXpath("//*[contains(@id,'$cell$12')]/div/a")
@@ -73,6 +50,7 @@
         });
     }
 
+   
     function bindSearchResultEvent() {
 
         // 监听回车事件
@@ -86,24 +64,67 @@
         })
 
         // TODO 监听查询点击事件
-        
+
         // TODO 监听点击型号事件
     }
 
-    // ------------------------ 主逻辑 ------------------------------
-    GM_log("Running ic361 script...")
-    GM_log(document.getElementsByClassName("mini-tree-selectedNode")[0])
 
-    // TODO 判断【现货查询】窗口是否已经打开
-    if (false) {
-        bindSearchResultEvent()
-    } else {
-        // 在打开入口添加一个监听事件
-        var menuButton = document.getElementsByClassName("mini-tree-selectedNode")[0].getElementsByClassName("mini-tree-nodetext")[0]
-        addEventListener(menuButton, "click", function () {
-            GM_log("Select 现货快查 menu")
-            bindSearchResultEvent()
-        });
+
+    function getElementByXpath(path) {
+        return document.evaluate(path, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
     }
+    function runWhenReady(xpath, callback) {
+        var numAttempts = 0;
+        var tryNow = function () {
+            var elem = getElementByXpath(xpath)
+            console.log(elem)
+            if (elem) {
+                callback(elem);
+            } else {
+                numAttempts++;
+                if (numAttempts >= 34) {
+                    console.warn('Giving up after 34 attempts. Could not find: ' + xpath);
+                } else {
+                    setTimeout(tryNow, 250 * Math.pow(1.1, numAttempts));
+                }
+            }
+        };
+        tryNow();
+    }
+    function addEventListener(element, type, fn) {
+        if (element.addEventListener) {
+            element.addEventListener(type, fn, false);
+        } else if (element.attachEvent) {
+            element.attachEvent("on" + type, fn);
+        } else {
+            element["on" + type] = fn;
+        }
+    }
+    function callback(mutationList, observer) {
+        for (const mutation of mutationList) {
+            if (mutation.type === 'childList') {
+                console.log('A child node has been added or removed.');
+            } else if (mutation.type === 'attributes') {
+                console.log(`The ${mutation.attributeName} attribute was modified.`);
+            } else {
+                console.log(`${mutation}`);
+            }
+        }
+    }
+    GM_log("Running ic361 script...")
+    
+    runWhenReady('//*[@id="5$cell$1"]/div/div/span[2]/span[2]', (elem) => {
+        GM_log('menu button is loaded')
+        addEventListener(elem, 'click', () => {
+            GM_log('menu button is clicked')
+            runWhenReady('/html/body/div[1]/div[4]/div/div/div[2]/div/table/tbody/tr/td[2]/div[2]/div/div/div/div/div/div[1]/div[2]/div/div/div[2]/div[4]/div[2]/div/table', (elem) => {
+                GM_log('table is loaded')
+                // 为什么这里的 Elem 是外部的
+                const observer = new MutationObserver(callback);
+                observer.observe(elem, { attributes: true, childList: true, subtree: true });
+            })
+        })
+    })
+
 
 })();
