@@ -6,6 +6,8 @@
 // @author       Rhythm-2019
 // @match        http://beta.ic361.cn/q/xq2.aspx
 // @icon         data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==
+// @require      https://unpkg.com/@popperjs/core@2
+// @require      https://unpkg.com/tippy.js@6
 // @grant GM_setValue
 // @grant GM_getValue
 // @grant GM_setClipboard
@@ -16,68 +18,32 @@
 // @grant window.focus
 // ==/UserScript==
 
+/* globals tippy */
 (function () {
 
+    const contentDivXpath = "//div[@id='dvInstockQ']/div[@class='mini-fit']/div[@class='mini-splitter mini-splitter-vertical']/div[@class='mini-splitter-border']/div[@class='mini-splitter-pane mini-splitter-pane1 mini-splitter-pane1-vertical']/div[@class='mini-fit grid_container']/div/div[@class='mini-panel-border mini-grid-border']/div[@class='mini-panel-viewport mini-grid-viewport']/div[@class='mini-panel-body mini-grid-rows']/div[@class='mini-grid-rows-view']"
 
-    // ---------------------------- 公共函数 --------------------------
-
-
-
-    function insertFloatWindow() {
-        var idElements = getElementByXpath("//*[contains(@id,'$cell$12')]/div/a")
-        if (idElements.length == 0) {
-            GM_log("no result need to add float window")
-            return
-        }
-        GM_log(`${idElements} need to add float window`)
-
-        // 添加当鼠标移动到元素上，插入一个浮动框
-        idElements.forEach(element => {
-            var span = document.createElement('div');
-            element.onmouseover = function () {
-                span.innerHTML = `
-                <span style = "width: 100px; border: 1px solid black; position: absolute; top: 50px; left: 3px">
-                    <ul>
-                        <li><a href="https://s.hqew.com/$(id).html">华强网</a><li>
-                    </ul>
-                </span>
-            `
-                element.parentNode.appendChild(span)
-            }
-            element.onmouseleave = function () {
-                span.innerText = '';
-            }
-        });
-    }
-
-   
-    function bindSearchResultEvent() {
-
-        // 监听回车事件
-        addEventListener(document, "keyup", function (e) {
-            GM_log("trigger keyup event ")
-            var event = e || window.event;
-            var key = event.which || event.keyCode || event.charCode;
-            if (key == 13) {
-                insertFloatWindow()
-            }
-        })
-
-        // TODO 监听查询点击事件
-
-        // TODO 监听点击型号事件
-    }
-
-
+    const websiteMap = new Map()
+    websiteMap.set('华强网', 'https://s.hqew.com/{0}.html')
+    websiteMap.set('IC交易网', 'https://www.ic.net.cn/searchNic/{0}.html')
+    websiteMap.set('正能量', 'https://www.bom.ai/ic/{0}.html')
+    websiteMap.set('云汉', 'https://search.ickey.cn/?keyword={0}')
+    websiteMap.set('立创', 'https://so.szlcsc.com/global.html?k={0}')
+    websiteMap.set('贸泽', 'https://www.mouser.cn/c/?q={0}')
+    websiteMap.set('Digikey', 'https://www.digikey.com/en/products/result?keywords={0}')
+    websiteMap.set('淘宝', 'https://s.taobao.com/search?q={0}')
+    
 
     function getElementByXpath(path) {
         return document.evaluate(path, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
+    }
+    function isElement(element) {
+        return element instanceof Element || element instanceof HTMLDocument;
     }
     function runWhenReady(xpath, callback) {
         var numAttempts = 0;
         var tryNow = function () {
             var elem = getElementByXpath(xpath)
-            console.log(elem)
             if (elem) {
                 callback(elem);
             } else {
@@ -100,31 +66,67 @@
             element["on" + type] = fn;
         }
     }
-    function callback(mutationList, observer) {
-        for (const mutation of mutationList) {
-            if (mutation.type === 'childList') {
-                console.log('A child node has been added or removed.');
-            } else if (mutation.type === 'attributes') {
-                console.log(`The ${mutation.attributeName} attribute was modified.`);
-            } else {
-                console.log(`${mutation}`);
+
+    function trimIdentify(identify) {
+        // 处理括号
+        let leftParenthesis = identify.indexOf('(')
+        let rightParenthesis = identify.lastIndexOf(')')
+        if (leftParenthesis != -1 && rightParenthesis != -1) {
+            identify = identify.substring(0, leftParenthesis)
+        }
+
+        return identify
+    }
+
+    function addTooltips(elem, identify) {
+        var html = '<ul style="list-style: none;"> <li style="display: inline; ">'
+        for (const [key, value] of websiteMap) {
+            html += `<a target="_blank" href="${String.format(value, trimIdentify(identify))}" style=" padding: 10px 10px; text-decoration: none; color: white; font-size:12px";> ${key} </a>`
+        }
+        html += '</li> </ul>'
+
+        tippy(elem, {
+            content: html,
+            interactive: true,
+            allowHTML: true,
+        });
+    }
+
+    function mutationHandleFunc(mutationRecords, observer) {
+        for (const mutationRecord of mutationRecords) {
+
+            if (mutationRecord.type === 'childList' && mutationRecord.addedNodes.length != 0) {
+                let tableElem = mutationRecord.addedNodes[0]
+                // 由于添加浮动提示框也会触发这里的突发事件，所以这里进行了判断
+                if (tableElem.tagName != 'TABLE') {
+                    continue
+                }
+                for (let trElem of tableElem.firstChild.children) {
+                    let trClassName = trElem.getAttribute('class')
+                    if (trClassName == null || !trClassName.includes('mini-grid-row')) {
+                        continue
+                    }
+
+                    for (let tdElem of trElem.children) {
+                        if (tdElem.length == 0) {
+                            continue
+                        }
+                        if (tdElem.firstChild != null && tdElem.firstChild.firstChild != null && isElement(tdElem.firstChild.firstChild)
+                            && tdElem.firstChild.firstChild.getAttribute('data-pn') != null) {
+                            addTooltips(tdElem, tdElem.firstChild.firstChild.getAttribute('data-pn'))
+                            break
+                        }
+                    }
+                }
             }
         }
     }
+
     GM_log("Running ic361 script...")
-    
-    runWhenReady('//*[@id="5$cell$1"]/div/div/span[2]/span[2]', (elem) => {
-        GM_log('menu button is loaded')
-        addEventListener(elem, 'click', () => {
-            GM_log('menu button is clicked')
-            runWhenReady('/html/body/div[1]/div[4]/div/div/div[2]/div/table/tbody/tr/td[2]/div[2]/div/div/div/div/div/div[1]/div[2]/div/div/div[2]/div[4]/div[2]/div/table', (elem) => {
-                GM_log('table is loaded')
-                // 为什么这里的 Elem 是外部的
-                const observer = new MutationObserver(callback);
-                observer.observe(elem, { attributes: true, childList: true, subtree: true });
-            })
-        })
+
+    runWhenReady(contentDivXpath, (elem) => {
+        GM_log('create obserer to content div')
+        const observer = new MutationObserver(mutationHandleFunc);
+        observer.observe(elem, { attributes: true, childList: true, subtree: true });
     })
-
-
 })();
