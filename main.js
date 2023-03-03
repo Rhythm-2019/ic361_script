@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         IC全能王插件
 // @namespace    http://tampermonkey.net/
-// @version      0.1
+// @version      0.2
 // @description  增强，为IC全能王中搜索的型号添加其他平台的快捷链接
 // @author       Rhythm-2019
 // @match        http://beta.ic361.cn/q/xq2.aspx
@@ -21,97 +21,114 @@
 // @grant window.focus
 // ==/UserScript==
 
-/* globals tippy */
-(function () {
+function GM_addStyle(url) {
+    let script = document.createElement('link');
+    script.setAttribute('rel', 'stylesheet');
+    script.setAttribute('type', 'text/css');
+    script.href = url
+    document.documentElement.appendChild(script);
+}
 
-    const contentDivXpath = "//div[@id='dvInstockQ']/div[@class='mini-fit']/div[@class='mini-splitter mini-splitter-vertical']/div[@class='mini-splitter-border']/div[@class='mini-splitter-pane mini-splitter-pane1 mini-splitter-pane1-vertical']/div[@class='mini-fit grid_container']/div/div[@class='mini-panel-border mini-grid-border']/div[@class='mini-panel-viewport mini-grid-viewport']/div[@class='mini-panel-body mini-grid-rows']/div[@class='mini-grid-rows-view']"
-    const observerConfig = { attributes: true, childList: true, subtree: true }
+GM_addStyle('https://unpkg.com/tippy.js@6/themes/light.css');
 
-    const websitePropArray = [
-        {name: '华强网', urlTempl: 'https://s.hqew.com/{0}.html'},
-        {name: 'IC交易网', urlTempl: 'https://www.ic.net.cn/searchNic/{0}.html'},
-        {name: '正能量', urlTempl: 'https://www.bom.ai/ic/{0}.html'},
-        {name: '云汉', urlTempl: 'https://search.ickey.cn/?keyword={0}'},
-        {name: '立创', urlTempl: 'https://so.szlcsc.com/global.html?k={0}'},
-        {name: '贸泽', urlTempl: 'https://www.mouser.cn/c/?q={0}'},
-        {name: 'Digikey', urlTempl: 'https://www.digikey.com/en/products/result?keywords={0}'},
-        {name: '淘宝', urlTempl: 'https://s.taobao.com/search?q={0}'},
-    ]
+const SHOW_TIPS_XPATH = "//div[@id='dvInstockQ']/div[1]/div[1]/div[1]/div[2]/div[1]/div/div[2]/div[4]/div[2]"
+const DEFAULT_OBSERVER_CONFIG = { attributes: true, childList: true, subtree: true }
 
-    const tipsTempl = `
-        <ul style="list-style: none;"> 
-            {{~ it.websitePropArray:item:index }}
-            <li style="display: inline;">
-                <span style="cursor: pointer; color: white; font-size: 10px;" onclick="window.open(String.format('{{=item.urlTempl}}', '{{=it.identify}}'), '_blank', 'noreferrer');">{{= item.name}}</span>
+const DATASHEET_LINK = "https://www.datasheetcatalog.com/datasheets_pdf/T/L/V/6/{0}.shtml"
+const WEBSITE_LINKS = [
+    {name: '华强网', urlTempl: 'https://s.hqew.com/{0}.html'},
+    {name: 'IC交易网', urlTempl: 'https://www.ic.net.cn/searchNic/{0}.html'},
+    {name: '正能量', urlTempl: 'https://www.bom.ai/ic/{0}.html'},
+    {name: '云汉', urlTempl: 'https://search.ickey.cn/?keyword={0}'},
+    {name: '立创', urlTempl: 'https://so.szlcsc.com/global.html?k={0}'},
+    {name: '贸泽', urlTempl: 'https://www.mouser.cn/c/?q={0}'},
+    {name: 'Digikey', urlTempl: 'https://www.digikey.com/en/products/result?keywords={0}'},
+    {name: '淘宝', urlTempl: 'https://s.taobao.com/search?q={0}'},
+]
+
+const TIPS_HTML_TEMPL = `
+<div style="font-size: 10px;">
+    <div>
+        <p>常用</p>
+        <span style="cursor: pointer; color: blue; margin: 10px;" class="clipboard" data-clipboard-text={{=it.identify}}>拷贝型号</span>
+        <span style="cursor: pointer; color: blue; margin: 10px;" onclick="window.open('{{=it.datasheetUrl}}', '_blank', 'noreferrer');">Datasheet</span>
+    </div>
+    <div>
+    <p>导航</p>
+        <ul style="list-style:"> 
+            {{~ it.websiteUrls:item:index }}
+            <li style="display: inline; none; margin: 10px">
+                <span style="cursor: pointer; color: blue;" onclick="window.open('{{= item.websiteUrl}}', '_blank', 'noreferrer');">{{= item.name}}</span>
             </li> 
             {{~ }}
         </ul>
-    `
+    </div>
+</div>
+`
 
-    var tipsTempFn = doT.template(tipsTempl)
+var tipsTempFn = doT.template(TIPS_HTML_TEMPL)
 
-    function getElementByXpath(path) {
-        return document.evaluate(path, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
-    }
-    function isElement(element) {
-        return element instanceof Element || element instanceof HTMLDocument;
-    }
-    function runWhenReady(xpath, callback) {
-        var numAttempts = 0;
-        var tryNow = function () {
-            var elem = getElementByXpath(xpath)
-            if (elem) {
-                callback(elem);
-            } else {
-                numAttempts++;
-                if (numAttempts >= 34) {
-                    console.warn('Giving up after 34 attempts. Could not find: ' + xpath);
-                } else {
-                    setTimeout(tryNow, 250 * Math.pow(1.1, numAttempts));
-                }
-            }
-        };
-        tryNow();
-    }
-    function addEventListener(element, type, fn) {
-        if (element.addEventListener) {
-            element.addEventListener(type, fn, false);
-        } else if (element.attachEvent) {
-            element.attachEvent("on" + type, fn);
+function getElementByXpath(path) {
+    return document.evaluate(path, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
+}
+function isElement(element) {
+    return element instanceof Element || element instanceof HTMLDocument;
+}
+function execIfDomReady(xpath, callback, locateMode='xpath') {
+    var numAttempts = 0;
+    var tryNow = function () {
+        var elem = getElementByXpath(xpath)
+        if (elem) {
+            callback(elem);
         } else {
-            element["on" + type] = fn;
+            numAttempts++;
+            if (numAttempts >= 34) {
+                console.warn('Giving up after 34 attempts. Could not find: ' + xpath);
+            } else {
+                setTimeout(tryNow, 250 * Math.pow(1.1, numAttempts));
+            }
         }
-    }
+    };
+    tryNow();
+}
+
+(function () {
 
     function normalizeIdentify(identify) {
-        // 处理括号
-        let leftParenthesis = identify.indexOf('(')
-        let rightParenthesis = identify.lastIndexOf(')')
-        if (leftParenthesis != -1 && rightParenthesis != -1) {
-            identify = identify.substring(0, leftParenthesis)
-        }
+        let invaildCharacters = ['+', '(', ')', '|', '/', '\\']
 
-        return identify
+        let end = identify.length
+        for (let c of invaildCharacters) {
+            let i = identify.indexOf(c)
+            if (i != -1 && i < end) {
+                end = i
+            }
+        }
+        return identify.substring(0, end)
     }
 
-    function addTooltips(elem, identify) {
-        console.log(tipsTempFn)
-        tippy(elem, {
-            content: tipsTempFn({identify: normalizeIdentify(identify), websitePropArray: websitePropArray}),
+    function addTooltips(tdElem, trElem) {
+            
+        let identify = tdElem.firstChild.firstChild.getAttribute('data-pn')
+        GM_log('add tippy to ' + id)
+
+        // 链接处理
+        let websiteUrls = WEBSITE_LINKS.map((item) => { 
+            const {name, urlTempl} = item
+            return {name, websiteUrl: String.format(urlTempl, normalizeIdentify(identify))}
+         })
+        let datasheetUrl = String.format(DATASHEET_LINK, normalizeIdentify(identify))
+        
+        tippy(tdElem, {
+            theme: 'light',
+            content: tipsTempFn({identify, websiteUrls, datasheetUrl}),
             interactive: true,
             allowHTML: true,
         });
-    }
-    function addClipboar(elem, identify) {
-        var button = document.createElement('button')
-        button.innerHTML = 'Copy'
-        button.setAttribute('data-clipboard-text', identify)
-        button.setAttribute('style', 'margin-left:10px')
-        button.setAttribute('id', 'clipboar')
 
-        new ClipboardJS('#clipboar');
-        elem.firstChild.appendChild(button)
+        new ClipboardJS('.clipboard');
     }
+
 
     function mutationHandleFunc(mutationRecords, observer) {
         for (const mutationRecord of mutationRecords) {
@@ -134,11 +151,10 @@
                         }
                         if (tdElem.firstChild != null && tdElem.firstChild.firstChild != null && isElement(tdElem.firstChild.firstChild)
                             && tdElem.firstChild.firstChild.getAttribute('data-pn') != null) {
-                            
+
                             // 添加连接提示
-                            addTooltips(tdElem, tdElem.firstChild.firstChild.getAttribute('data-pn'))
-                            // 添加复制按钮
-                            addClipboar(tdElem, tdElem.firstChild.firstChild.getAttribute('data-pn'))
+                            addTooltips(tdElem, trElem)
+        
                             break
                         }
                     }
@@ -149,9 +165,9 @@
 
     GM_log("Running ic361 script...")
 
-    runWhenReady(contentDivXpath, (elem) => {
+    execIfDomReady(SHOW_TIPS_XPATH, (elem) => {
         GM_log('create obserer to content div')
         const observer = new MutationObserver(mutationHandleFunc);
-        observer.observe(elem, observerConfig);
+        observer.observe(elem, DEFAULT_OBSERVER_CONFIG);
     })
 })();
